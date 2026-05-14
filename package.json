@@ -1,0 +1,10 @@
+{
+  "name": "smart-assist-static",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Pre-built Smart Assist prototype. The build is a no-op file copy; Atlas is already bundled in the static files so the deploy matches local exactly.",
+  "scripts": {
+    "build": "node copy-to-dist.mjs"
+  }
+}
