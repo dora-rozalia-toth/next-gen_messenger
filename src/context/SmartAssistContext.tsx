@@ -95,6 +95,16 @@ function SmartAssistProviderInner({ children }: { children: React.ReactNode }) {
   };
   const [panelOpen, setPanelOpen] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = () => {
+      setPanelOpen(false);
+      setOverlayOpen(false);
+    };
+    document.addEventListener("messenger-panel-opening", handler);
+    return () => document.removeEventListener("messenger-panel-opening", handler);
+  }, []);
+
   // Session-only preference for how Smart Assist opens. `null` means the user
   // hasn't picked a mode yet, so each surface falls back to its own default
   // (overlay outside a book, panel inside a book). Once the user expands or
@@ -208,14 +218,17 @@ function SmartAssistProviderInner({ children }: { children: React.ReactNode }) {
         setPrompt,
         panelOpen,
         overlayOpen,
-        openPanel: () => setPanelOpen(true),
+        openPanel: () => {
+          document.dispatchEvent(new CustomEvent("smart-assist-opening"));
+          setPanelOpen(true);
+        },
         openSmartAssist: () => {
-          // Outside a book: default to overlay unless the user chose panel.
+          document.dispatchEvent(new CustomEvent("smart-assist-opening"));
           if (preferredMode === "panel") setPanelOpen(true);
           else setOverlayOpen(true);
         },
         openInBook: () => {
-          // Inside a book: default to the docked panel unless the user chose overlay.
+          document.dispatchEvent(new CustomEvent("smart-assist-opening"));
           if (preferredMode === "overlay") setOverlayOpen(true);
           else setPanelOpen(true);
         },

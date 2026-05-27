@@ -264,11 +264,13 @@ export default function SmartAssistSidenav({
       open={open}
       variant={variant}
       onClose={onClose}
+      transitionDuration={600}
       sx={{
         width: open ? DRAWER_WIDTH + 24 : 0,
         minWidth: 0,
         overflow: "hidden",
         flexShrink: 0,
+        transition: "width 600ms cubic-bezier(0.22, 1, 0.36, 1)",
         ...(variant === "persistent" && { height: "100%" }),
         "& .MuiDrawer-paper": {
           width: DRAWER_WIDTH,
@@ -287,6 +289,9 @@ export default function SmartAssistSidenav({
           marginLeft: "12px",
           position: variant === "persistent" ? "relative" : "fixed",
           height: variant === "persistent" ? "calc(100% - 24px)" : "calc(100vh - 24px)",
+          opacity: open ? 1 : 0,
+          transform: open ? "none" : "translateX(8px)",
+          transition: "opacity 600ms cubic-bezier(0.22, 1, 0.36, 1), transform 600ms cubic-bezier(0.22, 1, 0.36, 1) !important",
         },
       }}
     >

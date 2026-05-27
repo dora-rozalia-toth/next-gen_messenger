@@ -1,6 +1,7 @@
 import { AppLayout } from "@diligentcorp/atlas-react-bundle";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router";
 import { useEffect, useRef } from "react";
+import { Box } from "@mui/material";
 import "./styles.css";
 
 import Navigation from "./Navigation.js";
@@ -17,6 +18,8 @@ import DirectorResourceCenterPage from "./pages/DirectorResourceCenterPage.js";
 import ResourceCenterPage from "./pages/ResourceCenterPage.js";
 import { SmartAssistProvider, useSmartAssist } from "./context/SmartAssistContext.js";
 import { CitationPreviewProvider } from "./context/CitationPreviewContext.js";
+import { MessengerProvider } from "./context/MessengerContext.js";
+import MessengerPanel from "./components/MessengerPanel.js";
 
 // ─── Force sidebar into persistent panel mode ─────────────────────────────────
 
@@ -364,12 +367,18 @@ function useTopBarTrailingCustomization() {
   useEffect(() => {
     const STYLE_ID = "topbar-trailing-style";
     const KEYBOARD_HOST_ID = "topbar-keyboard-host";
+    const MESSENGER_HOST_ID = "topbar-messenger-host";
     const KEYBOARD_SVG = `
 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <path d="M2.5 18.5V5.5H21.5V18.5H2.5ZM3.99998 17H20V6.99998H3.99998V17ZM8.11538 15.8846H15.8846V14.1154H8.11538V15.8846ZM5.11538 12.8846H6.88458V11.1154H5.11538V12.8846ZM8.11538 12.8846H9.88457V11.1154H8.11538V12.8846ZM11.1154 12.8846H12.8846V11.1154H11.1154V12.8846ZM14.1154 12.8846H15.8846V11.1154H14.1154V12.8846ZM17.1154 12.8846H18.8846V11.1154H17.1154V12.8846ZM5.11538 9.88458H6.88458V8.11538H5.11538V9.88458ZM8.11538 9.88458H9.88457V8.11538H8.11538V9.88458ZM11.1154 9.88458H12.8846V8.11538H11.1154V9.88458ZM14.1154 9.88458H15.8846V8.11538H14.1154V9.88458ZM17.1154 9.88458H18.8846V8.11538H17.1154V9.88458Z" fill="currentColor"/>
 </svg>`;
+    const MESSENGER_SVG = `
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M6.22983 17.1153V14.7307H18.6048L18.9221 15.0481V5.99998H21.3067V20.6537L17.7683 17.1153H6.22983ZM2.69141 16.2691V2.5H16.9221V12.7307H6.22983L2.69141 16.2691ZM15.4222 11.2308V3.99998H4.19138V11.9231L4.88373 11.2308H15.4222Z" fill="currentColor"/>
+</svg>`;
 
     let host: HTMLButtonElement | null = null;
+    let messengerHost: HTMLButtonElement | null = null;
 
     const tryInject = () => {
       const mockNav = document.querySelector("mock-hb-global-navigator");
@@ -386,7 +395,8 @@ function useTopBarTrailingCustomization() {
           atlas-gn-org-settings-menu { display: none !important; }
           atlas-gn-user-menu::before { display: none !important; }
           atlas-gn-user-menu { padding-inline-start: 0 !important; }
-          #${KEYBOARD_HOST_ID} {
+          #${KEYBOARD_HOST_ID},
+          #${MESSENGER_HOST_ID} {
             all: unset;
             box-sizing: border-box;
             display: inline-flex;
@@ -398,9 +408,28 @@ function useTopBarTrailingCustomization() {
             color: var(--lens-semantic-color-action-secondary-on-secondary);
             background: transparent;
             cursor: pointer;
+            position: relative;
           }
-          #${KEYBOARD_HOST_ID}:hover { background: var(--lens-semantic-color-action-secondary-hover-fill); }
-          #${KEYBOARD_HOST_ID}:active { background: var(--lens-semantic-color-action-secondary-active-fill); }
+          #${KEYBOARD_HOST_ID}:hover,
+          #${MESSENGER_HOST_ID}:hover { background: var(--lens-semantic-color-action-secondary-hover-fill); }
+          #${KEYBOARD_HOST_ID}:active,
+          #${MESSENGER_HOST_ID}:active { background: var(--lens-semantic-color-action-secondary-active-fill); }
+          #${MESSENGER_HOST_ID} .badge {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            display: flex;
+            width: var(--Semantic-Icon-Size-Sm, 16px);
+            height: var(--Semantic-Icon-Size-Sm, 16px);
+            justify-content: center;
+            align-items: center;
+            border-radius: 50%;
+            background: var(--Semantic-Color-Status-New-Default, #1C4EE4);
+            color: #fff;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1;
+          }
         `;
         mockRoot.appendChild(style);
       }
@@ -417,12 +446,29 @@ function useTopBarTrailingCustomization() {
         host.innerHTML = KEYBOARD_SVG;
         helpMenu.parentNode.insertBefore(host, helpMenu);
       }
+
+      // Create / reuse messenger host (between keyboard and help)
+      messengerHost = mockRoot.querySelector(`#${MESSENGER_HOST_ID}`) as HTMLButtonElement | null;
+      if (!messengerHost) {
+        messengerHost = document.createElement("button");
+        messengerHost.id = MESSENGER_HOST_ID;
+        messengerHost.type = "button";
+        messengerHost.setAttribute("slot", "trailing");
+        messengerHost.setAttribute("aria-label", "Messenger");
+        messengerHost.title = "Messenger";
+        messengerHost.innerHTML = MESSENGER_SVG + `<span class="badge">3</span>`;
+        messengerHost.addEventListener("click", () => {
+          document.dispatchEvent(new CustomEvent("messenger-toggle"));
+        });
+        helpMenu.parentNode.insertBefore(messengerHost, helpMenu);
+      }
       return true;
     };
 
     if (tryInject()) {
       return () => {
         host?.remove();
+        messengerHost?.remove();
       };
     }
     const id = setInterval(() => {
@@ -431,6 +477,7 @@ function useTopBarTrailingCustomization() {
     return () => {
       clearInterval(id);
       host?.remove();
+      messengerHost?.remove();
     };
   }, []);
 }
@@ -490,13 +537,20 @@ function AppShell() {
   useTopBarTrailingCustomization();
   return (
     <AppLayout navigation={<Navigation />} orgName="ACME Ltd.">
-      <CitationPreviewProvider>
-        <SmartAssistProvider>
-          <SmartAssistRouteSync />
-          <ViewSwitcherForRoute />
-          <Outlet />
-        </SmartAssistProvider>
-      </CitationPreviewProvider>
+      <MessengerProvider>
+        <CitationPreviewProvider>
+          <SmartAssistProvider>
+            <SmartAssistRouteSync />
+            <ViewSwitcherForRoute />
+            <Box sx={{ display: "flex", height: "100%", overflow: "hidden", flex: 1 }}>
+              <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <Outlet />
+              </Box>
+              <MessengerPanel />
+            </Box>
+          </SmartAssistProvider>
+        </CitationPreviewProvider>
+      </MessengerProvider>
     </AppLayout>
   );
 }
