@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar, Box, Divider, Drawer, IconButton, Stack, Tooltip, Typography, useTheme } from "@mui/material";
 import CloseIcon from "@diligentcorp/atlas-react-bundle/icons/Close";
 import ExternalLinkIcon from "@diligentcorp/atlas-react-bundle/icons/ExternalLink";
@@ -20,6 +20,8 @@ import Reply from "@diligentcorp/atlas-react-bundle/icons/Reply";
 import FileIcon from "@diligentcorp/atlas-react-bundle/icons/File";
 import Download from "@diligentcorp/atlas-react-bundle/icons/Download";
 import { useMessenger } from "../context/MessengerContext.js";
+import GroupComposer from "./GroupComposer.js";
+import { type ExistingGroup, type Person, EXISTING_GROUPS } from "../data/people.js";
 
 const DRAWER_WIDTH = 440;
 
@@ -47,7 +49,13 @@ interface Message {
   attachment?: { name: string; size: string };
 }
 
-const conversations: Conversation[] = [
+function shortName(name: string) {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
+const initialConversations: Conversation[] = [
   { id: "1", name: "Sarah Johnson", initials: "SJ", avatarColor: "blue", time: "10:28", preview: "Board appreciates your insight and steady leadership during the quarterly review meeting.", unread: 3 },
   { id: "2", name: "Michael Kim", initials: "MK", avatarColor: "green", time: "10:30", preview: "Your dedication to the project has not gone unnoticed. Excellent work on the deliverables this sprint." },
   { id: "3", name: "Rachel Brown", initials: "RB", avatarColor: "purple", time: "10:32", preview: "Great job on the presentation! Your creativity shines through every slide you produced.", unread: 2 },
@@ -347,20 +355,36 @@ function MessageItem({ message }: { message: Message }) {
   );
 }
 
-function ThreadView({ conversation, messages, onBack }: { conversation: Conversation; messages: Message[]; onBack: () => void }) {
+interface ThreadViewProps {
+  conversation: Conversation | null;
+  messages: Message[];
+  onBack: () => void;
+  hideSubheader?: boolean;
+  composerSlot?: React.ReactNode;
+  onBackgroundClick?: () => void;
+  onComposerBarClick?: () => void;
+  inputValue?: string;
+  onInputChange?: (v: string) => void;
+  onSend?: () => void;
+}
+
+function ThreadView({ conversation, messages, onBack, hideSubheader, composerSlot, onBackgroundClick, onComposerBarClick, inputValue, onInputChange, onSend }: ThreadViewProps) {
   const { tokens: { semantic: { color } }, presets: { AvatarPresets } } = useTheme();
-  const avatarProps = AvatarPresets.getAvatarProps({ size: "small", color: conversation.avatarColor });
-  const yellowOverride = conversation.avatarColor === "yellow" ? { backgroundColor: "var(--Semantic-Color-Accent-Yellow-Background, #FFF2AA)" } : {};
+  const avatarColor = conversation?.avatarColor ?? "blue";
+  const avatarProps = AvatarPresets.getAvatarProps({ size: "small", color: avatarColor });
+  const yellowOverride = avatarColor === "yellow" ? { backgroundColor: "var(--Semantic-Color-Accent-Yellow-Background, #FFF2AA)" } : {};
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isEmpty = messages.length === 0;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView();
-  }, []);
+  }, [conversation?.id]);
 
   const todayIndex = 4;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {composerSlot}
       {/* Thread content area — gradient behind subheader so rounded corners are visible */}
       <Box
         sx={{
@@ -371,49 +395,52 @@ function ThreadView({ conversation, messages, onBack }: { conversation: Conversa
           overflow: "hidden",
           background: "var(--Gradient-background-default, radial-gradient(125.08% 101.36% at 0% 0%, var(--Semantic-Color-Background-Base-gradient-start, #F9F9FC) 30.53%, var(--Semantic-Color-Background-Base-gradient-end, #FCFCFF) 100%))",
         }}
+        onClick={onBackgroundClick}
       >
         {/* Thread subheader */}
-        <Stack
-          direction="row"
-          alignItems="center"
-          gap="8px"
-          sx={{
-            flexShrink: 0,
-            px: "12px",
-            py: "12px",
-            borderBottomLeftRadius: "12px",
-            borderBottomRightRadius: "12px",
-            boxShadow: "0px 2px 4px 0px rgba(0, 0, 0, 0.06)",
-            backgroundColor: "#fff",
-            position: "relative",
-            zIndex: 1,
-          }}
-        >
-          <IconButton sx={{ p: "4px", width: 32, height: 32 }} onClick={onBack} title="Back">
-            <ArrowLeftIcon size="lg" />
-          </IconButton>
-          <Avatar {...avatarProps} sx={{ ...avatarProps.sx, ...yellowOverride, width: 32, height: 32, fontSize: "12px" }}>
-            {conversation.initials}
-          </Avatar>
-          <Typography
+        {!hideSubheader && conversation && (
+          <Stack
+            direction="row"
+            alignItems="center"
+            gap="8px"
             sx={{
-              fontSize: "14px",
-              fontWeight: 600,
-              lineHeight: "20px",
-              color: color.type.default.value,
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              flexShrink: 0,
+              px: "12px",
+              py: "12px",
+              borderBottomLeftRadius: "12px",
+              borderBottomRightRadius: "12px",
+              boxShadow: "0px 2px 4px 0px rgba(0, 0, 0, 0.06)",
+              backgroundColor: "#fff",
+              position: "relative",
+              zIndex: 1,
             }}
           >
-            {conversation.name}
-          </Typography>
-          <IconButton sx={{ p: "4px", width: 32, height: 32 }} title="More options">
-            <MoreIcon size="lg" />
-          </IconButton>
-        </Stack>
+            <IconButton sx={{ p: "4px", width: 32, height: 32 }} onClick={onBack} title="Back">
+              <ArrowLeftIcon size="lg" />
+            </IconButton>
+            <Avatar {...avatarProps} sx={{ ...avatarProps.sx, ...yellowOverride, width: 32, height: 32, fontSize: "12px" }}>
+              {conversation.initials}
+            </Avatar>
+            <Typography
+              sx={{
+                fontSize: "14px",
+                fontWeight: 600,
+                lineHeight: "20px",
+                color: color.type.default.value,
+                flex: 1,
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {conversation.name}
+            </Typography>
+            <IconButton sx={{ p: "4px", width: 32, height: 32 }} title="More options">
+              <MoreIcon size="lg" />
+            </IconButton>
+          </Stack>
+        )}
 
         {/* Messages area */}
         <Box
@@ -446,28 +473,55 @@ function ThreadView({ conversation, messages, onBack }: { conversation: Conversa
             },
           }}
         />
-        <Box sx={{ display: "flex", flexDirection: "column", gap: "16px", pb: "8px" }}>
-          {messages.map((msg, index) => (
-            <Box key={msg.id}>
-              {index === todayIndex && (
-                <Box sx={{ display: "flex", alignItems: "center", gap: "4px", py: "8px", mb: "16px" }}>
-                  <Divider sx={{ flex: 1 }} />
-                  <Typography sx={{ fontSize: "12px", fontWeight: 600, color: color.type.muted.value, px: "4px" }}>
-                    Today
-                  </Typography>
-                  <Divider sx={{ flex: 1 }} />
-                </Box>
-              )}
-              <MessageItem message={msg} />
+        {isEmpty ? (
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              textAlign: "center",
+              px: "40px",
+              pb: "80px",
+              cursor: onBackgroundClick ? "pointer" : "default",
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", mb: "16px", color: color.type.muted.value }}>
+              <MessagesIcon size="xl" />
             </Box>
-          ))}
-          <div ref={messagesEndRef} />
-        </Box>
+            <Typography sx={{ fontSize: "20px", fontWeight: 700, color: color.type.default.value, mb: "4px" }}>
+              You are starting a new group chat
+            </Typography>
+            <Typography sx={{ fontSize: "14px", color: color.type.muted.value }}>
+              Type your first message below
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: "16px", pb: "8px" }}>
+            {messages.map((msg, index) => (
+              <Box key={msg.id}>
+                {index === todayIndex && (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: "4px", py: "8px", mb: "16px" }}>
+                    <Divider sx={{ flex: 1 }} />
+                    <Typography sx={{ fontSize: "12px", fontWeight: 600, color: color.type.muted.value, px: "4px" }}>
+                      Today
+                    </Typography>
+                    <Divider sx={{ flex: 1 }} />
+                  </Box>
+                )}
+                <MessageItem message={msg} />
+              </Box>
+            ))}
+            <div ref={messagesEndRef} />
+          </Box>
+        )}
         </Box>
       </Box>
 
       {/* Input area */}
       <Box
+        onClick={onComposerBarClick}
         sx={{
           flexShrink: 0,
           borderTop: `1px solid ${color.ui.divider.default.value}`,
@@ -475,6 +529,7 @@ function ThreadView({ conversation, messages, onBack }: { conversation: Conversa
           borderTopRightRadius: "12px",
           backgroundColor: color.surface.default.value,
           overflow: "hidden",
+          cursor: onComposerBarClick ? "pointer" : "default",
         }}
       >
         {/* Formatting toolbar */}
@@ -505,11 +560,40 @@ function ThreadView({ conversation, messages, onBack }: { conversation: Conversa
         </Box>
 
         {/* Text input */}
-        <Box sx={{ px: "12px", pb: "12px" }}>
+        <Box sx={{ px: "12px", pb: "12px" }} onClick={(e) => e.stopPropagation()}>
           <Box sx={{ pt: "12px", pb: "40px" }}>
-            <Typography sx={{ fontSize: "16px", color: color.type.muted.value }}>
-              Type something...
-            </Typography>
+            {onInputChange ? (
+              <Box
+                component="textarea"
+                value={inputValue ?? ""}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onInputChange(e.target.value)}
+                onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    onSend?.();
+                  }
+                }}
+                placeholder="Type something..."
+                rows={1}
+                sx={{
+                  width: "100%",
+                  border: "none",
+                  outline: "none",
+                  resize: "none",
+                  background: "transparent",
+                  fontFamily: "inherit",
+                  fontSize: "16px",
+                  lineHeight: "24px",
+                  color: color.type.default.value,
+                  p: 0,
+                  "&::placeholder": { color: color.type.muted.value, opacity: 1 },
+                }}
+              />
+            ) : (
+              <Typography sx={{ fontSize: "16px", color: color.type.muted.value }}>
+                Type something...
+              </Typography>
+            )}
           </Box>
           <Stack direction="row" alignItems="center" justifyContent="space-between">
             <Stack direction="row" gap={0}>
@@ -519,12 +603,15 @@ function ThreadView({ conversation, messages, onBack }: { conversation: Conversa
             </Stack>
             <IconButton
               size="small"
+              onClick={onSend}
+              disabled={!onSend || !(inputValue ?? "").trim()}
               sx={{
                 width: 40,
                 height: 40,
                 borderRadius: "12px",
                 border: `1px solid ${color.outline.fixed.value}`,
                 color: color.type.default.value,
+                "&.Mui-disabled": { color: color.type.muted.value, opacity: 0.5 },
               }}
             >
               <Send size="md" />
@@ -536,15 +623,262 @@ function ThreadView({ conversation, messages, onBack }: { conversation: Conversa
   );
 }
 
+function existingGroupToConversation(group: ExistingGroup): Conversation {
+  return {
+    id: `group-${group.id}`,
+    name: group.name,
+    initials: group.name.slice(0, 2).toUpperCase(),
+    avatarColor: "blue",
+    time: "",
+    preview: "",
+    isGroup: true,
+    groupCount: group.participantIds.length,
+  };
+}
+
+const NEW_GROUP_PLACEHOLDER: Conversation = {
+  id: "__new_group__",
+  name: "New group",
+  initials: "NG",
+  avatarColor: "blue",
+  time: "",
+  preview: "",
+  isGroup: true,
+};
+
+function ActiveConversationHeader({
+  recipients,
+  groupName,
+  onBack,
+  onClose,
+}: {
+  recipients: Person[];
+  groupName: string;
+  onBack: () => void;
+  onClose: () => void;
+}) {
+  const { tokens: { semantic: { color } }, presets: { AvatarPresets } } = useTheme();
+
+  const showOverflow = recipients.length > 2;
+  const visibleAvatars = showOverflow ? recipients.slice(0, 1) : recipients.slice(0, 2);
+  const overflowCount = showOverflow ? recipients.length - 1 : 0;
+  const namesText = groupName.trim()
+    ? groupName.trim()
+    : recipients.map((r) => shortName(r.name)).join(", ");
+
+  return (
+    <Box sx={{ flexShrink: 0, borderBottom: `1px solid ${color.ui.divider.default.value}`, backgroundColor: "#fff" }}>
+      <Stack direction="row" alignItems="center" sx={{ px: "8px", height: "56px", gap: "8px" }}>
+        <IconButton size="small" onClick={onBack} aria-label="Back" sx={{ width: 32, height: 32, color: color.type.default.value }}>
+          <ArrowLeftIcon size="md" />
+        </IconButton>
+        <Box sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+          {visibleAvatars.map((p, i) => {
+            const avatarProps = AvatarPresets.getAvatarProps({ size: "small", color: p.avatarColor });
+            const yellowOverride = p.avatarColor === "yellow"
+              ? { backgroundColor: "var(--Semantic-Color-Accent-Yellow-Background, #FFF2AA)" }
+              : {};
+            return (
+              <Avatar
+                key={p.id}
+                {...avatarProps}
+                sx={{
+                  ...avatarProps.sx,
+                  ...yellowOverride,
+                  width: 28,
+                  height: 28,
+                  fontSize: "11px",
+                  border: "2px solid #fff",
+                  marginLeft: i === 0 ? 0 : "-8px",
+                }}
+              >
+                {p.initials}
+              </Avatar>
+            );
+          })}
+          {overflowCount > 0 && (
+            <Box
+              sx={{
+                width: 28,
+                height: 28,
+                borderRadius: "9999px",
+                backgroundColor: color.surface.variant.value,
+                color: color.type.default.value,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "10px",
+                fontWeight: 600,
+                border: "2px solid #fff",
+                marginLeft: "-8px",
+              }}
+            >
+              +{overflowCount}
+            </Box>
+          )}
+        </Box>
+        <Typography
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: "14px",
+            fontWeight: 600,
+            lineHeight: "20px",
+            color: color.type.default.value,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {namesText}
+        </Typography>
+        <IconButton size="small" aria-label="More options" sx={{ width: 32, height: 32, color: color.type.default.value }}>
+          <MoreIcon size="md" />
+        </IconButton>
+        <IconButton size="small" onClick={onClose} aria-label="Close messenger" sx={{ width: 32, height: 32, color: color.type.default.value }}>
+          <CloseIcon size="md" />
+        </IconButton>
+      </Stack>
+    </Box>
+  );
+}
+
+interface ActiveConversation {
+  id: string;
+  recipients: Person[];
+  groupName: string;
+  messages: Message[];
+}
+
 export default function MessengerPanel() {
   const { tokens: { semantic: { color } } } = useTheme();
   const { panelOpen, closePanel } = useMessenger();
+  const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [matchedGroup, setMatchedGroup] = useState<ExistingGroup | null>(null);
+  const [composerRecipients, setComposerRecipients] = useState<Person[]>([]);
+  const [composerGroupName, setComposerGroupName] = useState<string>("");
+  const [activeConversation, setActiveConversation] = useState<ActiveConversation | null>(null);
+  const [activeDraft, setActiveDraft] = useState("");
 
   const selectedConversation = selectedConversationId
-    ? conversations.find((c) => c.id === selectedConversationId)
+    ? (conversations.find((c) => c.id === selectedConversationId) ??
+       (() => {
+         const groupId = selectedConversationId.startsWith("group-") ? selectedConversationId.slice(6) : null;
+         const match = groupId ? EXISTING_GROUPS.find((g) => g.id === groupId) : null;
+         return match ? existingGroupToConversation(match) : null;
+       })())
     : null;
-  const messages = selectedConversation ? getThreadMessages(selectedConversation) : [];
+
+  const composerBackgroundConversation = matchedGroup
+    ? existingGroupToConversation(matchedGroup)
+    : NEW_GROUP_PLACEHOLDER;
+  const composerBackgroundMessages = matchedGroup
+    ? getThreadMessages(existingGroupToConversation(matchedGroup))
+    : [];
+
+  const openComposer = () => {
+    setComposerOpen(true);
+    setSelectedConversationId(null);
+    setMatchedGroup(null);
+    setComposerRecipients([]);
+    setComposerGroupName("");
+  };
+
+  const closeComposer = () => {
+    setComposerOpen(false);
+    setMatchedGroup(null);
+    setComposerRecipients([]);
+    setComposerGroupName("");
+  };
+
+  const dismissComposerKeepConversation = () => {
+    if (matchedGroup) {
+      setSelectedConversationId(`group-${matchedGroup.id}`);
+    }
+    setComposerOpen(false);
+    setMatchedGroup(null);
+  };
+
+  const handleRecipientsChange = useCallback((recipients: Person[], groupName: string) => {
+    setComposerRecipients(recipients);
+    setComposerGroupName(groupName);
+  }, []);
+
+  const activateNewConversation = () => {
+    if (composerRecipients.length === 0) return;
+    setActiveConversation({
+      id: `active-${Date.now()}`,
+      recipients: composerRecipients,
+      groupName: composerGroupName,
+      messages: [],
+    });
+    setComposerOpen(false);
+    setMatchedGroup(null);
+    setActiveDraft("");
+  };
+
+  const sendActiveMessage = () => {
+    if (!activeConversation) return;
+    const text = activeDraft.trim();
+    if (!text) return;
+    const isFirst = activeConversation.messages.length === 0;
+    const newMessage: Message = {
+      id: `am-${Date.now()}`,
+      sender: "John Doe",
+      initials: "JD",
+      avatarColor: "blue",
+      time: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+      text,
+    };
+    const next: ActiveConversation = {
+      ...activeConversation,
+      messages: [...activeConversation.messages, newMessage],
+    };
+    setActiveConversation(next);
+    setActiveDraft("");
+
+    if (isFirst) {
+      const isGroup = next.recipients.length > 1;
+      const firstRecipient = next.recipients[0];
+      const convo: Conversation = {
+        id: next.id,
+        name: next.groupName.trim()
+          || (isGroup ? next.recipients.map((r) => shortName(r.name)).join(", ") : firstRecipient.name),
+        initials: isGroup ? "NG" : firstRecipient.initials,
+        avatarColor: isGroup ? "blue" : firstRecipient.avatarColor,
+        time: "now",
+        preview: text,
+        isGroup,
+        groupCount: isGroup ? next.recipients.length : undefined,
+      };
+      setConversations((cs) => [convo, ...cs]);
+    } else {
+      setConversations((cs) => cs.map((c) => c.id === next.id ? { ...c, preview: text, time: "now" } : c));
+    }
+  };
+
+  const exitActiveConversation = () => {
+    if (!activeConversation) return;
+    if (activeConversation.messages.length === 0) {
+      setComposerOpen(true);
+      setComposerRecipients(activeConversation.recipients);
+      setComposerGroupName(activeConversation.groupName);
+    }
+    setActiveConversation(null);
+    setActiveDraft("");
+  };
+
+  const conversationToShow = composerOpen
+    ? composerBackgroundConversation
+    : selectedConversation;
+  const messagesToShow = composerOpen
+    ? composerBackgroundMessages
+    : (selectedConversation ? getThreadMessages(selectedConversation) : []);
+
+  const showThreadView = composerOpen || selectedConversation !== null;
+  const showActiveView = activeConversation !== null;
 
   return (
     <Drawer
@@ -583,7 +917,25 @@ export default function MessengerPanel() {
         },
       }}
     >
-      {selectedConversation ? (
+      {showActiveView && activeConversation ? (
+        <>
+          <ActiveConversationHeader
+            recipients={activeConversation.recipients}
+            groupName={activeConversation.groupName}
+            onBack={exitActiveConversation}
+            onClose={closePanel}
+          />
+          <ThreadView
+            conversation={null}
+            messages={activeConversation.messages}
+            onBack={exitActiveConversation}
+            hideSubheader
+            inputValue={activeDraft}
+            onInputChange={setActiveDraft}
+            onSend={sendActiveMessage}
+          />
+        </>
+      ) : showThreadView ? (
         <>
           {/* Messenger title bar (persists in thread view) */}
           <Box sx={{ flexShrink: 0, borderBottom: `1px solid ${color.ui.divider.default.value}`, backgroundColor: "#fff" }}>
@@ -614,9 +966,34 @@ export default function MessengerPanel() {
             </Stack>
           </Box>
           <ThreadView
-            conversation={selectedConversation}
-            messages={messages}
-            onBack={() => setSelectedConversationId(null)}
+            conversation={conversationToShow}
+            messages={messagesToShow}
+            onBack={() => {
+              if (composerOpen) closeComposer();
+              else setSelectedConversationId(null);
+            }}
+            hideSubheader={composerOpen}
+            composerSlot={composerOpen ? (
+              <GroupComposer
+                onClose={closeComposer}
+                onMatchedGroupChange={setMatchedGroup}
+                onRecipientsChange={handleRecipientsChange}
+                initialRecipients={composerRecipients}
+                initialGroupName={composerGroupName}
+              />
+            ) : undefined}
+            onBackgroundClick={
+              composerOpen
+                ? (matchedGroup
+                    ? dismissComposerKeepConversation
+                    : (composerRecipients.length > 0 ? activateNewConversation : undefined))
+                : undefined
+            }
+            onComposerBarClick={
+              composerOpen && !matchedGroup && composerRecipients.length > 0
+                ? activateNewConversation
+                : undefined
+            }
           />
         </>
       ) : (
@@ -673,6 +1050,7 @@ export default function MessengerPanel() {
               </Typography>
               <Box
                 component="button"
+                onClick={openComposer}
                 aria-label="New conversation"
                 sx={{
                   all: "unset",
