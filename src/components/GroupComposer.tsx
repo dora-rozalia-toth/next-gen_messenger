@@ -253,7 +253,7 @@ export default function GroupComposer({ onClose, onMatchedGroupChange, onRecipie
                 }
               }}
               placeholder={recipients.length === 0 ? "Enter a name, or e-mail" : ""}
-              sx={{ ...rawInputSx, flex: "1 1 120px", minWidth: 80 }}
+              sx={{ ...rawInputSx, flex: "1 1 0", minWidth: 0 }}
             />
           </Box>
         </Box>
@@ -309,7 +309,7 @@ export default function GroupComposer({ onClose, onMatchedGroupChange, onRecipie
       </Box>
 
       {/* Group name OR matched-groups chip selector — same flat 440px row */}
-      <Box sx={{ ...flatRowSx, mt: "4px", alignItems: "flex-start" }}>
+      <Box sx={{ ...flatRowSx, mt: "8px", alignItems: showMatches ? "flex-start" : "center" }}>
         {!showMatches && (
           <Box sx={{ display: "flex", alignItems: "center", color: color.action.primary.default.value, flexShrink: 0 }}>
             <EditIcon size="md" />
@@ -381,18 +381,22 @@ function MatchedGroupsRow({
       const containerWidth = container.offsetWidth;
       const children = Array.from(container.querySelectorAll<HTMLElement>("[data-chip]"));
       const gap = 4;
-      // First pass: do all chips fit without an overflow chip?
+      // The trailing "+" IconButton sits inside the same flex row as the chips,
+      // so it consumes container width. Reserve 32px (button) + 4px (gap).
+      const startNewButtonReserve = 36;
+      const chipsBudget = Math.max(0, containerWidth - startNewButtonReserve);
+      // First pass: do all chips fit alongside the + button?
       let totalWidth = 0;
       children.forEach((c, i) => {
         totalWidth += c.offsetWidth + (i > 0 ? gap : 0);
       });
-      if (totalWidth <= containerWidth) {
+      if (totalWidth <= chipsBudget) {
         setVisibleCount(children.length);
         return;
       }
       // Otherwise reserve space for a "+N more" chip and pack what fits.
       const overflowChipReserve = 64;
-      const available = Math.max(0, containerWidth - overflowChipReserve);
+      const available = Math.max(0, chipsBudget - overflowChipReserve);
       let used = 0;
       let count = 0;
       for (const child of children) {
@@ -454,48 +458,45 @@ function MatchedGroupsRow({
       <Typography sx={{ fontSize: "12px", fontWeight: 600, lineHeight: "16px", letterSpacing: "0.3px", color: color.type.default.value, mb: "8px" }}>
         Suggestions
       </Typography>
-      <Stack direction="row" alignItems="center" gap="4px">
-        <Box
-          ref={containerRef}
-          sx={{
-            flex: 1,
-            display: "flex",
-            flexWrap: expanded ? "wrap" : "nowrap",
-            gap: "4px",
-            maxHeight: expanded ? 64 : 32,
-            overflowY: expanded ? "auto" : "hidden",
-            overflowX: "hidden",
-            alignItems: "center",
-          }}
-        >
-          {shown.map((g) => {
-            const picked = g.id === pickedId;
-            return (
-              <Chip
-                key={g.id}
-                data-chip
-                size="xsmall"
-                clickable
-                label={g.name}
-                onClick={() => onPick(g.id)}
-                sx={picked ? chipSelectedSx : chipUnselectedSx}
-              />
-            );
-          })}
-          {!expanded && overflow > 0 && (
+      <Box
+        ref={containerRef}
+        sx={{
+          display: "flex",
+          flexWrap: expanded ? "wrap" : "nowrap",
+          gap: "4px",
+          maxHeight: expanded ? 64 : 32,
+          overflowY: expanded ? "auto" : "hidden",
+          overflowX: "hidden",
+          alignItems: "center",
+        }}
+      >
+        {shown.map((g) => {
+          const picked = g.id === pickedId;
+          return (
             <Chip
+              key={g.id}
               data-chip
               size="xsmall"
               clickable
-              label={`+${overflow} more`}
-              onClick={onToggleExpanded}
-              sx={{
-                ...chipUnselectedSx,
-                color: color.type.muted.value,
-              }}
+              label={g.name}
+              onClick={() => onPick(g.id)}
+              sx={picked ? chipSelectedSx : chipUnselectedSx}
             />
-          )}
-        </Box>
+          );
+        })}
+        {!expanded && overflow > 0 && (
+          <Chip
+            data-chip
+            size="xsmall"
+            clickable
+            label={`+${overflow} more`}
+            onClick={onToggleExpanded}
+            sx={{
+              ...chipUnselectedSx,
+              color: color.type.muted.value,
+            }}
+          />
+        )}
         <IconButton
           size="small"
           onClick={onStartNew}
@@ -512,7 +513,7 @@ function MatchedGroupsRow({
         >
           <AddIcon size="md" />
         </IconButton>
-      </Stack>
+      </Box>
     </Box>
   );
 }
