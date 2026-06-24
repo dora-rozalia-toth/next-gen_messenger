@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Avatar, Box, Chip, Divider, Drawer, IconButton, Menu, MenuItem, ListItemIcon, ListItemText, Stack, Tooltip, Typography, useTheme } from "@mui/material";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Avatar, Box, Chip, Divider, Drawer, IconButton, Menu, MenuItem, ListItemIcon, ListItemText, Popover, Stack, Tooltip, Typography, useTheme } from "@mui/material";
 import CloseIcon from "@diligentcorp/atlas-react-bundle/icons/Close";
 import ExternalLinkIcon from "@diligentcorp/atlas-react-bundle/icons/ExternalLink";
 import MoreIcon from "@diligentcorp/atlas-react-bundle/icons/More";
@@ -21,10 +21,13 @@ import EditIcon from "@diligentcorp/atlas-react-bundle/icons/Edit";
 import TrashIcon from "@diligentcorp/atlas-react-bundle/icons/Trash";
 import SignOutIcon from "@diligentcorp/atlas-react-bundle/icons/SignOut";
 import AlertOff from "@diligentcorp/atlas-react-bundle/icons/AlertOff";
+import Email from "@diligentcorp/atlas-react-bundle/icons/Email";
+import Call from "@diligentcorp/atlas-react-bundle/icons/Call";
+import Building from "@diligentcorp/atlas-react-bundle/icons/Building";
 import { useMessenger } from "../context/MessengerContext.js";
 import GroupComposer from "./GroupComposer.js";
 import { AddMemberView, GroupNameView, LeaveDialog, ParticipantsView } from "./GroupManagementViews.js";
-import { type ExistingGroup, type Person, CURRENT_USER_ID, EXISTING_GROUPS, PEOPLE } from "../data/people.js";
+import { type ExistingGroup, type Person, CURRENT_USER_ID, EXISTING_GROUPS, PEOPLE, personHasExistingConversation } from "../data/people.js";
 
 const DRAWER_WIDTH = 440;
 
@@ -37,6 +40,8 @@ interface Conversation {
   avatarColor: AvatarColor;
   time: string;
   preview: string;
+  /** Optional rich HTML preview (e.g. with @mention chips). Rendered instead of `preview`. */
+  previewHtml?: string;
   unread?: number;
   isGroup?: boolean;
   groupCount?: number;
@@ -61,14 +66,40 @@ function shortName(name: string) {
   return `${parts[0]} ${parts[parts.length - 1][0]}.`;
 }
 
+/**
+ * Build the HTML for an @mention chip. Carries `data-mention-id` so the hover
+ * contact card can look the person up. Mentions of the current user are tinted
+ * with the purple accent token to set them apart.
+ */
+function mentionHtml(personId: string): string {
+  const person = PEOPLE.find((p) => p.id === personId);
+  if (!person) return "";
+  const isMe = personId === CURRENT_USER_ID;
+  const colorVar = isMe
+    ? "var(--Semantic-Color-Accent-Purple-Content, #6E2C8B)"
+    : "var(--Semantic-Color-Action-Primary-Default, #1C4EE4)";
+  return `<span data-mention="true" data-mention-id="${personId}" style="color:${colorVar};font-weight:600;">@${person.name}</span>`;
+}
+
+/** Compact @name chip for list previews — no contact-card hook, just the tint. */
+function previewMention(personId: string): string {
+  const person = PEOPLE.find((p) => p.id === personId);
+  if (!person) return "";
+  const isMe = personId === CURRENT_USER_ID;
+  const colorVar = isMe
+    ? "var(--Semantic-Color-Accent-Purple-Content, #6E2C8B)"
+    : "var(--Semantic-Color-Action-Primary-Default, #1C4EE4)";
+  return `<span style="color:${colorVar};font-weight:600;">@${person.name}</span>`;
+}
+
 const initialConversations: Conversation[] = [
-  { id: "1", name: "Sarah Johnson", initials: "SJ", avatarColor: "blue", time: "10:28", preview: "Board appreciates your insight and steady leadership during the quarterly review meeting.", unread: 3 },
+  { id: "1", name: "Sarah Johnson", initials: "SJ", avatarColor: "blue", time: "10:28", preview: "@John Doe board appreciates your insight and steady leadership during the quarterly review.", previewHtml: `${previewMention(CURRENT_USER_ID)} board appreciates your insight and steady leadership during the quarterly review.`, unread: 3 },
   { id: "2", name: "Michael Kim", initials: "MK", avatarColor: "green", time: "10:30", preview: "Your dedication to the project has not gone unnoticed. Excellent work on the deliverables this sprint." },
   { id: "3", name: "Rachel Brown", initials: "RB", avatarColor: "purple", time: "10:32", preview: "Great job on the presentation! Your creativity shines through every slide you produced.", unread: 2 },
   { id: "4", name: "Lucas Davis", initials: "LD", avatarColor: "green", time: "10:34", preview: "Thank you for your analytical approach. It has significantly improved our decision-making process." },
   { id: "5", name: "Alice Nguyen", initials: "AN", avatarColor: "blue", time: "10:36", preview: "Your teamwork and collaboration are exemplary and inspire everyone around you to do better." },
-  { id: "6", name: "Brian Thompson", initials: "BT", avatarColor: "red", time: "12:30", preview: "Appreciate your ability to tackle challenges head-on. Keep it up and let me know if you need support." },
-  { id: "7", name: "Finance team", initials: "JS", avatarColor: "green", time: "23.05.", preview: "Your insights have opened new avenues for our market expansion strategy going forward.", unread: 2, isGroup: true, groupCount: 24 },
+  { id: "6", name: "Brian Thompson", initials: "BT", avatarColor: "red", time: "12:30", preview: "Hey @Alice Martin, appreciate your ability to tackle challenges head-on. Keep it up!", previewHtml: `Hey ${previewMention("p1")}, appreciate your ability to tackle challenges head-on. Keep it up!` },
+  { id: "7", name: "Finance team", initials: "JS", avatarColor: "green", time: "23.05.", preview: "@John Doe your insights have opened new avenues for our market expansion strategy.", previewHtml: `${previewMention(CURRENT_USER_ID)} your insights have opened new avenues for our market expansion strategy.`, unread: 2, isGroup: true, groupCount: 24 },
   { id: "8", name: "Ethan Adams", initials: "EA", avatarColor: "yellow", time: "04.06", preview: "You have an incredible knack for problem-solving. Great job!" },
   { id: "9", name: "Grace Fisher", initials: "GF", avatarColor: "green", time: "09.12.", preview: "Thank you for your commitment to quality. It elevates our work and sets a standard for the team." },
   { id: "10", name: "Henry Roberts", initials: "HR", avatarColor: "purple", time: "03.12.", preview: "Your leadership during the crisis has been inspiring. Thank you for keeping everyone focused." },
@@ -85,7 +116,28 @@ function getThreadMessages(conversation: Conversation): Message[] {
     { id: "m5", ...me, time: "10:10 AM", text: "I appreciate that. One more thing, can you shift my prep session with Operations by 30 minutes if needed?" },
     { id: "m6", ...other, time: "10:15 AM", text: "Yes, I can handle that. I'll first check whether the team is flexible, and if they are, I'll move it to give you a bit more breathing room before the board session starts." },
     { id: "m7", ...me, time: "10:17 AM", text: "Thanks!" },
-    { id: "m8", ...other, time: "10:30 AM", text: "Just received this from Andrew, please take a look at it when you have the time.", attachment: { name: "Finances_Q3", size: "24 MB" } },
+    {
+      id: "m8",
+      ...other,
+      time: "10:30 AM",
+      text: "@John Doe just received this from Andrew, please take a look at it when you have the time.",
+      html: `${mentionHtml(CURRENT_USER_ID)} just received this from Andrew, please take a look at it when you have the time.`,
+      attachment: { name: "Finances_Q3", size: "24 MB" },
+    },
+    {
+      id: "m9",
+      ...me,
+      time: "10:32 AM",
+      text: "Will do. @Alice Martin can you confirm the figures on page 4 before I forward this?",
+      html: `Will do. ${mentionHtml("p1")} can you confirm the figures on page 4 before I forward this?`,
+    },
+    {
+      id: "m10",
+      ...other,
+      time: "10:35 AM",
+      text: "@Alice Martin and @John Doe — looping you both in so we're aligned ahead of the board session.",
+      html: `${mentionHtml("p1")} and ${mentionHtml(CURRENT_USER_ID)} — looping you both in so we're aligned ahead of the board session.`,
+    },
   ];
 }
 
@@ -154,6 +206,8 @@ function ConversationItem({ conversation, onSelect }: { conversation: Conversati
         </Stack>
         <Stack direction="row" alignItems="center" justifyContent="space-between" gap="8px" sx={{ mt: "2px" }}>
           <Typography
+            component="div"
+            {...(conversation.previewHtml ? { dangerouslySetInnerHTML: { __html: conversation.previewHtml } } : {})}
             sx={{
               overflow: "hidden",
               color: "var(--Semantic-Color-Type-Default, #242628)",
@@ -166,7 +220,7 @@ function ConversationItem({ conversation, onSelect }: { conversation: Conversati
               lineHeight: "18px",
             }}
           >
-            {conversation.preview}
+            {conversation.previewHtml ? undefined : conversation.preview}
           </Typography>
           {conversation.unread && (
             <Box
@@ -341,6 +395,58 @@ function ReactionPill({
   );
 }
 
+/** Hover card showing a mentioned person's contact details. */
+function ContactCard({ person }: { person: Person }) {
+  const { tokens: { semantic: { color } }, presets: { AvatarPresets } } = useTheme();
+  const ap = AvatarPresets.getAvatarProps({ size: "small", color: person.avatarColor });
+  const yellow = person.avatarColor === "yellow"
+    ? { backgroundColor: "var(--Semantic-Color-Accent-Yellow-Background, #FFF2AA)" }
+    : {};
+  const rows: { Icon: typeof Email; text: string }[] = [
+    { Icon: Email, text: person.email },
+    ...(person.phone ? [{ Icon: Call, text: person.phone }] : []),
+    ...(person.company ? [{ Icon: Building, text: person.company }] : []),
+  ];
+  return (
+    <Box
+      data-contact-card="true"
+      sx={{
+        width: 280,
+        backgroundColor: color.surface.default.value,
+        borderRadius: "12px",
+        boxShadow: "0px 0px 2px 0px rgba(0,0,0,0.1), 0px 8px 16px 0px rgba(0,0,0,0.1)",
+        px: "16px",
+        py: "20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "16px",
+      }}
+    >
+      <Stack direction="row" alignItems="center" gap="8px">
+        <Avatar {...ap} sx={{ ...ap.sx, ...yellow, width: 32, height: 32, fontSize: "11px" }}>
+          {person.initials}
+        </Avatar>
+        <Typography sx={{ fontSize: "14px", fontWeight: 600, color: color.type.default.value, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {person.name}
+        </Typography>
+      </Stack>
+      <Box sx={{ height: "1px", width: "100%", backgroundColor: color.ui.divider.default.value }} />
+      <Stack gap="4px">
+        {rows.map(({ Icon, text }, i) => (
+          <Stack key={i} direction="row" alignItems="center" gap="8px">
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: color.type.default.value, "& svg": { width: 20, height: 20 } }}>
+              <Icon size="md" />
+            </Box>
+            <Typography sx={{ fontSize: "12px", color: color.type.muted.value, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {text}
+            </Typography>
+          </Stack>
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
 function MessageItem({
   message,
   reactions,
@@ -365,6 +471,42 @@ function MessageItem({
   const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
   const isOwnMessage = message.sender === "John Doe";
   const moreOpen = Boolean(moreAnchor);
+  // Contact card shown when hovering an @mention chip inside the message body.
+  const [cardPos, setCardPos] = useState<{ left: number; top: number } | null>(null);
+  const [cardPerson, setCardPerson] = useState<Person | null>(null);
+
+  const closeCard = useCallback(() => {
+    setCardPos(null);
+    setCardPerson(null);
+  }, []);
+
+  // While a card is open, watch the pointer globally and close it the instant
+  // the cursor is over neither a mention chip nor the card. The card sits flush
+  // against the mention (no gap), so closing immediately leaves no dead zone.
+  // This also covers cases React's synthetic mouseleave misses (fast moves, the
+  // innerHTML mention spans), which previously left cards stuck open.
+  const cardOpen = Boolean(cardPos && cardPerson);
+  useEffect(() => {
+    if (!cardOpen) return;
+    const onMove = (ev: MouseEvent) => {
+      const target = ev.target as HTMLElement | null;
+      if (!target?.closest("[data-mention-id]") && !target?.closest("[data-contact-card]")) closeCard();
+    };
+    document.addEventListener("mousemove", onMove);
+    return () => document.removeEventListener("mousemove", onMove);
+  }, [cardOpen, closeCard]);
+
+  // Open the card when the cursor enters a mention chip in the message body.
+  const handleBodyOver = useCallback((e: React.MouseEvent) => {
+    const span = (e.target as HTMLElement).closest("[data-mention-id]") as HTMLElement | null;
+    if (!span) return;
+    const person = PEOPLE.find((p) => p.id === span.getAttribute("data-mention-id"));
+    if (person) {
+      const rect = span.getBoundingClientRect();
+      setCardPos({ left: rect.left, top: rect.top });
+      setCardPerson(person);
+    }
+  }, []);
 
   return (
     <Box
@@ -411,6 +553,7 @@ function MessageItem({
         </Stack>
         <Typography
           component="div"
+          onMouseOver={handleBodyOver}
           {...(message.html ? { dangerouslySetInnerHTML: { __html: message.html } } : {})}
           sx={{
             fontFamily: "var(--Semantic-Typography-Text-Body-Font, Inter)",
@@ -423,10 +566,33 @@ function MessageItem({
             "& p": { m: 0 },
             "& ul, & ol": { m: 0, pl: "20px" },
             "& a": { color: "var(--Semantic-Color-Action-Primary-Default, #1C4EE4)" },
+            "& [data-mention]": { cursor: "default" },
           }}
         >
           {message.html ? undefined : message.text}
         </Typography>
+        <Popover
+          open={Boolean(cardPos && cardPerson)}
+          anchorReference="anchorPosition"
+          anchorPosition={cardPos ? { left: cardPos.left, top: cardPos.top } : undefined}
+          onClose={closeCard}
+          anchorOrigin={{ vertical: "top", horizontal: "left" }}
+          transformOrigin={{ vertical: "bottom", horizontal: "left" }}
+          disableAutoFocus
+          disableEnforceFocus
+          disableScrollLock
+          hideBackdrop
+          slotProps={{
+            paper: {
+              elevation: 0,
+              square: true,
+              sx: { p: 0, width: "max-content", overflow: "visible", backgroundColor: "transparent", backgroundImage: "none", boxShadow: "none" },
+            },
+          }}
+          sx={{ pointerEvents: "none", "& .MuiPopover-paper": { pointerEvents: "auto" } }}
+        >
+          {cardPerson && <ContactCard person={cardPerson} />}
+        </Popover>
         {message.attachment && (
           <Box
             sx={{
@@ -766,11 +932,217 @@ function ComposerPlaceholder({ onClick }: { onClick?: () => void }) {
   );
 }
 
-function RichTextComposer({ onSendMessage }: { onSendMessage: (html: string, text: string) => void }) {
+/** A single @mention candidate. `all` is the special "Notify everyone" entry. */
+type MentionCandidate =
+  | { kind: "all"; label: string; sublabel: string }
+  | { kind: "person"; person: Person };
+
+/** Bold the substring of `name` that matches `query` (first, case-insensitive match). */
+function highlightMatch(name: string, query: string) {
+  const q = query.trim();
+  if (!q) return name;
+  const idx = name.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return name;
+  return (
+    <>
+      {name.slice(0, idx)}
+      <Box component="span" sx={{ fontWeight: 600 }}>
+        {name.slice(idx, idx + q.length)}
+      </Box>
+      {name.slice(idx + q.length)}
+    </>
+  );
+}
+
+/** Floating "Suggestions" list shown while typing `@` in the composer. */
+function MentionSuggestions({
+  candidates,
+  activeIndex,
+  query,
+  onPick,
+}: {
+  candidates: MentionCandidate[];
+  activeIndex: number;
+  query: string;
+  onPick: (candidate: MentionCandidate) => void;
+}) {
+  const { tokens: { semantic: { color } }, presets: { AvatarPresets } } = useTheme();
+  return (
+    <Box
+      sx={{
+        backgroundColor: color.surface.default.value,
+        borderRadius: "12px",
+        boxShadow: "0px 0px 2px 0px rgba(0,0,0,0.1), 0px 8px 16px 0px rgba(0,0,0,0.1)",
+        overflow: "hidden",
+        width: 300,
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", px: "12px", py: "12px" }}>
+        <Typography sx={{ fontSize: "11px", letterSpacing: "0.4px", color: color.type.muted.value }}>
+          Suggestions
+        </Typography>
+      </Box>
+      <Box sx={{ maxHeight: 260, overflowY: "auto", pb: "4px" }}>
+        {candidates.map((c, i) => {
+          const active = i === activeIndex;
+          const name = c.kind === "all" ? c.label : c.person.name;
+          const sub = c.kind === "all" ? c.sublabel : c.person.email;
+          const avatarColor = c.kind === "person" ? c.person.avatarColor : "blue";
+          const ap = AvatarPresets.getAvatarProps({ size: "small", color: avatarColor });
+          const yellow = avatarColor === "yellow"
+            ? { backgroundColor: "var(--Semantic-Color-Accent-Yellow-Background, #FFF2AA)" }
+            : {};
+          return (
+            <Box
+              key={c.kind === "all" ? "__all__" : c.person.id}
+              role="option"
+              aria-selected={active}
+              onMouseDown={(e: React.MouseEvent) => {
+                e.preventDefault();
+                onPick(c);
+              }}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                px: "12px",
+                py: "8px",
+                cursor: "pointer",
+                backgroundColor: "transparent",
+                "&:hover": { backgroundColor: color.action.secondary.hoverFill.value },
+              }}
+            >
+              {c.kind === "all" ? (
+                <Box
+                  sx={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "9999px",
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: "var(--Semantic-Color-Accent-Gray-Background, #DEE0E9)",
+                    color: color.type.default.value,
+                  }}
+                >
+                  <GroupIcon size="md" />
+                </Box>
+              ) : (
+                <Avatar {...ap} sx={{ ...ap.sx, ...yellow, width: 32, height: 32, fontSize: "11px" }}>
+                  {c.person.initials}
+                </Avatar>
+              )}
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography sx={{ fontSize: "14px", lineHeight: "20px", color: color.type.default.value, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {c.kind === "person" ? highlightMatch(name, query) : name}
+                </Typography>
+                <Typography sx={{ fontSize: "12px", lineHeight: "16px", color: color.type.muted.value, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {sub}
+                </Typography>
+              </Box>
+            </Box>
+          );
+        })}
+      </Box>
+    </Box>
+  );
+}
+
+function RichTextComposer({ onSendMessage, participants = [] }: { onSendMessage: (html: string, text: string) => void; participants?: Person[] }) {
   const { tokens: { semantic: { color } } } = useTheme();
   const editorRef = useRef<HTMLDivElement>(null);
   const [isEmpty, setIsEmpty] = useState(true);
   const [activeFormats, setActiveFormats] = useState<Record<string, boolean>>({});
+  // @-mention popover state. `query` is the text typed after the active `@`.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  // Screen position of the active `@` glyph — the popover's left/bottom anchor.
+  const [mentionAnchor, setMentionAnchor] = useState<{ left: number; top: number } | null>(null);
+
+  // Build the suggestion list: "All" first, then participants matching the query.
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.trim().toLowerCase();
+    const people = participants.filter((p) => p.id !== CURRENT_USER_ID && p.name.toLowerCase().includes(q));
+    const all: MentionCandidate[] = "all".includes(q) || q === ""
+      ? [{ kind: "all", label: "All", sublabel: "Notify everyone in this conversation" }]
+      : [];
+    return [...all, ...people.map((p): MentionCandidate => ({ kind: "person", person: p }))];
+  }, [mentionQuery, participants]);
+
+  const closeMentions = useCallback(() => {
+    setMentionQuery(null);
+    setMentionIndex(0);
+    setMentionAnchor(null);
+  }, []);
+
+  // Read the word immediately before the caret; open the popover when it's an `@token`.
+  const detectMention = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return closeMentions();
+    const node = sel.anchorNode;
+    if (!node || node.nodeType !== Node.TEXT_NODE) return closeMentions();
+    const text = (node.textContent ?? "").slice(0, sel.anchorOffset);
+    const match = /(?:^|\s)@([^\s@]*)$/.exec(text);
+    if (match) {
+      setMentionQuery(match[1]);
+      setMentionIndex(0);
+      // Anchor the popover to the `@` glyph so it tracks the caret horizontally.
+      const atIndex = sel.anchorOffset - match[1].length - 1;
+      const atRange = document.createRange();
+      atRange.setStart(node, atIndex);
+      atRange.setEnd(node, atIndex + 1);
+      const rect = atRange.getBoundingClientRect();
+      setMentionAnchor({ left: rect.left, top: rect.top });
+    } else {
+      closeMentions();
+    }
+  }, [closeMentions]);
+
+  // Replace the active `@query` token with a styled mention chip + trailing space.
+  const insertMention = useCallback((candidate: MentionCandidate) => {
+    const el = editorRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0) return;
+    const node = sel.anchorNode;
+    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+    const offset = sel.anchorOffset;
+    const before = (node.textContent ?? "").slice(0, offset);
+    const match = /(^|\s)@([^\s@]*)$/.exec(before);
+    if (!match) return;
+    const start = offset - match[2].length - 1; // include the '@'
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, offset);
+    range.deleteContents();
+
+    const label = candidate.kind === "all" ? "All" : candidate.person.name;
+    const mention = document.createElement("span");
+    mention.setAttribute("data-mention", "true");
+    if (candidate.kind === "person") mention.setAttribute("data-mention-id", candidate.person.id);
+    mention.contentEditable = "false";
+    mention.textContent = `@${label}`;
+    // Current user mentions are tinted purple to set them apart.
+    mention.style.color = candidate.kind === "person" && candidate.person.id === CURRENT_USER_ID
+      ? color.accent.purple.content.value
+      : color.action.primary.default.value;
+    mention.style.fontWeight = "600";
+    range.insertNode(mention);
+
+    // Trailing space so typing continues normally after the chip.
+    const space = document.createTextNode(" ");
+    mention.after(space);
+    const after = document.createRange();
+    after.setStartAfter(space);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
+
+    el.focus();
+    closeMentions();
+    setIsEmpty(htmlToPlainText(el.innerHTML).length === 0);
+  }, [closeMentions, color.action.primary.default.value]);
 
   const refreshState = useCallback(() => {
     const el = editorRef.current;
@@ -786,7 +1158,8 @@ function RichTextComposer({ onSendMessage }: { onSendMessage: (html: string, tex
       }
     }
     setActiveFormats(next);
-  }, []);
+    detectMention();
+  }, [detectMention]);
 
   const applyFormat = useCallback((command: RichFormat) => {
     editorRef.current?.focus();
@@ -804,7 +1177,10 @@ function RichTextComposer({ onSendMessage }: { onSendMessage: (html: string, tex
     el.innerHTML = "";
     setIsEmpty(true);
     setActiveFormats({});
-  }, [onSendMessage]);
+    closeMentions();
+  }, [onSendMessage, closeMentions]);
+
+  const mentionOpen = mentionQuery !== null && mentionCandidates.length > 0;
 
   return (
     <Box
@@ -876,7 +1252,34 @@ function RichTextComposer({ onSendMessage }: { onSendMessage: (html: string, tex
       </Box>
 
       {/* Editor + send */}
-      <Box sx={{ px: "12px", pb: "12px" }}>
+      <Box sx={{ px: "12px", pb: "12px", position: "relative" }}>
+        {/* @mention suggestions — portaled so the composer's overflow:hidden can't clip it */}
+        <Popover
+          open={mentionOpen}
+          anchorReference="anchorPosition"
+          anchorPosition={mentionAnchor ? { left: mentionAnchor.left, top: mentionAnchor.top } : undefined}
+          anchorOrigin={{ vertical: "top", horizontal: "left" }}
+          transformOrigin={{ vertical: "bottom", horizontal: "left" }}
+          disableAutoFocus
+          disableEnforceFocus
+          disableScrollLock
+          hideBackdrop
+          slotProps={{
+            paper: {
+              elevation: 0,
+              square: true,
+              sx: { mt: "-8px", p: 0, m: 0, width: "max-content", overflow: "visible", backgroundColor: "transparent", backgroundImage: "none", boxShadow: "none" },
+            },
+          }}
+          sx={{ pointerEvents: "none", "& .MuiPopover-paper": { pointerEvents: "auto" } }}
+        >
+          <MentionSuggestions
+            candidates={mentionCandidates}
+            activeIndex={mentionIndex}
+            query={mentionQuery ?? ""}
+            onPick={insertMention}
+          />
+        </Popover>
         <Box
           ref={editorRef}
           contentEditable
@@ -888,7 +1291,30 @@ function RichTextComposer({ onSendMessage }: { onSendMessage: (html: string, tex
           onInput={refreshState}
           onKeyUp={refreshState}
           onMouseUp={refreshState}
+          onBlur={closeMentions}
           onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+            if (mentionOpen) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setMentionIndex((i) => (i + 1) % mentionCandidates.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setMentionIndex((i) => (i - 1 + mentionCandidates.length) % mentionCandidates.length);
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                insertMention(mentionCandidates[mentionIndex]);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                closeMentions();
+                return;
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();
@@ -947,6 +1373,7 @@ interface ThreadViewProps {
   onBackgroundClick?: () => void;
   onComposerBarClick?: () => void;
   onSendMessage?: (html: string, text: string) => void;
+  participants?: Person[];
   reactionsByMessage?: Record<string, MessageReactions>;
   onToggleReaction?: (messageId: string, emoji: string) => void;
   replyCounts?: Record<string, number>;
@@ -957,7 +1384,7 @@ interface ThreadViewProps {
   parentMessageId?: string;
 }
 
-function ThreadView({ conversation, messages, onBack, hideSubheader, subheaderSlot, composerSlot, onBackgroundClick, onComposerBarClick, onSendMessage, reactionsByMessage, onToggleReaction, replyCounts, onOpenThread, showTodayDivider = true, threadSeparatorAfterId, threadSeparatorCount, parentMessageId }: ThreadViewProps) {
+function ThreadView({ conversation, messages, onBack, hideSubheader, subheaderSlot, composerSlot, onBackgroundClick, onComposerBarClick, onSendMessage, participants, reactionsByMessage, onToggleReaction, replyCounts, onOpenThread, showTodayDivider = true, threadSeparatorAfterId, threadSeparatorCount, parentMessageId }: ThreadViewProps) {
   const { tokens: { semantic: { color } }, presets: { AvatarPresets } } = useTheme();
   const avatarColor = conversation?.avatarColor ?? "blue";
   const avatarProps = AvatarPresets.getAvatarProps({ size: "small", color: avatarColor });
@@ -1080,7 +1507,9 @@ function ThreadView({ conversation, messages, onBack, hideSubheader, subheaderSl
               <MessagesIcon size="xl" />
             </Box>
             <Typography sx={{ fontSize: "20px", fontWeight: 700, color: color.type.default.value, mb: "4px" }}>
-              You are starting a new group chat
+              {conversation?.isGroup
+                ? "You are starting a new group chat"
+                : `You are starting a new chat${conversation?.name ? ` with ${conversation.name}` : ""}`}
             </Typography>
             <Typography sx={{ fontSize: "14px", color: color.type.muted.value }}>
               Type your first message below
@@ -1148,7 +1577,7 @@ function ThreadView({ conversation, messages, onBack, hideSubheader, subheaderSl
 
       {/* Input area */}
       {onSendMessage ? (
-        <RichTextComposer onSendMessage={onSendMessage} />
+        <RichTextComposer onSendMessage={onSendMessage} participants={participants} />
       ) : (
         <ComposerPlaceholder onClick={onComposerBarClick} />
       )}
@@ -1489,17 +1918,51 @@ export default function MessengerPanel() {
   const selectedConversation = selectedConversationId
     ? (conversations.find((c) => c.id === selectedConversationId) ??
        (() => {
-         const groupId = selectedConversationId.startsWith("group-") ? selectedConversationId.slice(6) : null;
-         const match = groupId ? EXISTING_GROUPS.find((g) => g.id === groupId) : null;
-         return match ? existingGroupToConversation(match) : null;
+         if (selectedConversationId.startsWith("group-")) {
+           const match = EXISTING_GROUPS.find((g) => g.id === selectedConversationId.slice(6));
+           return match ? existingGroupToConversation(match) : null;
+         }
+         if (selectedConversationId.startsWith("person-")) {
+           const person = PEOPLE.find((p) => p.id === selectedConversationId.slice(7));
+           return person ? personToConversation(person) : null;
+         }
+         return null;
        })())
     : null;
+
+  // Participants offered as @mention candidates for the selected conversation.
+  const selectedConversationParticipants: Person[] = (() => {
+    if (!selectedConversationId) return [];
+    if (selectedConversationId.startsWith("group-")) {
+      const group = EXISTING_GROUPS.find((g) => g.id === selectedConversationId.slice(6));
+      return group
+        ? group.participantIds.map((id) => PEOPLE.find((p) => p.id === id)).filter((p): p is Person => Boolean(p))
+        : [];
+    }
+    if (selectedConversationId.startsWith("person-")) {
+      const person = PEOPLE.find((p) => p.id === selectedConversationId.slice(7));
+      return person ? [person] : [];
+    }
+    if (selectedConversation?.isGroup) {
+      const total = selectedConversation.groupCount ?? 5;
+      return PEOPLE.filter((p) => p.id !== CURRENT_USER_ID).slice(0, Math.max(1, total - 1));
+    }
+    // 1-on-1 list conversation: synthesize a person from the conversation header.
+    return selectedConversation
+      ? [{ id: selectedConversation.id, name: selectedConversation.name, initials: selectedConversation.initials, email: "", avatarColor: selectedConversation.avatarColor }]
+      : [];
+  })();
 
   // Background preview rules while composing:
   //   1 recipient → load that person's 1-on-1 thread
   //   2 recipients with a matched group → that group's thread
   //   3+ recipients OR forced new group → empty placeholder
   const singleRecipient = composerRecipients.length === 1 ? composerRecipients[0] : null;
+  // A sole recipient with no message history behaves like a brand-new group:
+  // clicking the background/composer bar starts the conversation rather than
+  // re-opening a (non-existent) saved thread.
+  const singleRecipientWithThread =
+    singleRecipient && personHasExistingConversation(singleRecipient.id) ? singleRecipient : null;
   const composerBackgroundConversation = matchedGroup
     ? existingGroupToConversation(matchedGroup)
     : singleRecipient
@@ -1507,7 +1970,7 @@ export default function MessengerPanel() {
       : NEW_GROUP_PLACEHOLDER;
   const composerBackgroundMessages = matchedGroup
     ? getThreadMessages(existingGroupToConversation(matchedGroup))
-    : singleRecipient
+    : singleRecipient && personHasExistingConversation(singleRecipient.id)
       ? getThreadMessages(personToConversation(singleRecipient))
       : [];
 
@@ -1839,6 +2302,7 @@ export default function MessengerPanel() {
                 />
               }
               onSendMessage={sendActiveMessage}
+              participants={activeConversation.recipients}
               reactionsByMessage={reactionsByMessage}
               onToggleReaction={toggleReaction}
               replyCounts={replyCounts}
@@ -1939,6 +2403,7 @@ export default function MessengerPanel() {
             replyCounts={replyCounts}
             onOpenThread={composerOpen ? undefined : openThread}
             onSendMessage={composerOpen ? undefined : sendSelectedMessage}
+            participants={composerOpen ? undefined : selectedConversationParticipants}
             onBack={() => {
               if (composerOpen) closeComposer();
               else setSelectedConversationId(null);
@@ -1955,14 +2420,14 @@ export default function MessengerPanel() {
             ) : undefined}
             onBackgroundClick={
               composerOpen
-                ? (matchedGroup || singleRecipient
+                ? (matchedGroup || singleRecipientWithThread
                     ? dismissComposerKeepConversation
                     : (composerRecipients.length > 0 ? activateNewConversation : undefined))
                 : undefined
             }
             onComposerBarClick={
               composerOpen
-                ? (matchedGroup || singleRecipient
+                ? (matchedGroup || singleRecipientWithThread
                     ? dismissComposerKeepConversation
                     : (composerRecipients.length > 0 ? activateNewConversation : undefined))
                 : undefined
