@@ -40,6 +40,8 @@ interface Conversation {
   avatarColor: AvatarColor;
   time: string;
   preview: string;
+  /** Optional rich HTML preview (e.g. with @mention chips). Rendered instead of `preview`. */
+  previewHtml?: string;
   unread?: number;
   isGroup?: boolean;
   groupCount?: number;
@@ -64,19 +66,6 @@ function shortName(name: string) {
   return `${parts[0]} ${parts[parts.length - 1][0]}.`;
 }
 
-const initialConversations: Conversation[] = [
-  { id: "1", name: "Sarah Johnson", initials: "SJ", avatarColor: "blue", time: "10:28", preview: "Board appreciates your insight and steady leadership during the quarterly review meeting.", unread: 3 },
-  { id: "2", name: "Michael Kim", initials: "MK", avatarColor: "green", time: "10:30", preview: "Your dedication to the project has not gone unnoticed. Excellent work on the deliverables this sprint." },
-  { id: "3", name: "Rachel Brown", initials: "RB", avatarColor: "purple", time: "10:32", preview: "Great job on the presentation! Your creativity shines through every slide you produced.", unread: 2 },
-  { id: "4", name: "Lucas Davis", initials: "LD", avatarColor: "green", time: "10:34", preview: "Thank you for your analytical approach. It has significantly improved our decision-making process." },
-  { id: "5", name: "Alice Nguyen", initials: "AN", avatarColor: "blue", time: "10:36", preview: "Your teamwork and collaboration are exemplary and inspire everyone around you to do better." },
-  { id: "6", name: "Brian Thompson", initials: "BT", avatarColor: "red", time: "12:30", preview: "Appreciate your ability to tackle challenges head-on. Keep it up and let me know if you need support." },
-  { id: "7", name: "Finance team", initials: "JS", avatarColor: "green", time: "23.05.", preview: "Your insights have opened new avenues for our market expansion strategy going forward.", unread: 2, isGroup: true, groupCount: 24 },
-  { id: "8", name: "Ethan Adams", initials: "EA", avatarColor: "yellow", time: "04.06", preview: "You have an incredible knack for problem-solving. Great job!" },
-  { id: "9", name: "Grace Fisher", initials: "GF", avatarColor: "green", time: "09.12.", preview: "Thank you for your commitment to quality. It elevates our work and sets a standard for the team." },
-  { id: "10", name: "Henry Roberts", initials: "HR", avatarColor: "purple", time: "03.12.", preview: "Your leadership during the crisis has been inspiring. Thank you for keeping everyone focused." },
-];
-
 /**
  * Build the HTML for an @mention chip. Carries `data-mention-id` so the hover
  * contact card can look the person up. Mentions of the current user are tinted
@@ -91,6 +80,30 @@ function mentionHtml(personId: string): string {
     : "var(--Semantic-Color-Action-Primary-Default, #1C4EE4)";
   return `<span data-mention="true" data-mention-id="${personId}" style="color:${colorVar};font-weight:600;">@${person.name}</span>`;
 }
+
+/** Compact @name chip for list previews — no contact-card hook, just the tint. */
+function previewMention(personId: string): string {
+  const person = PEOPLE.find((p) => p.id === personId);
+  if (!person) return "";
+  const isMe = personId === CURRENT_USER_ID;
+  const colorVar = isMe
+    ? "var(--Semantic-Color-Accent-Purple-Content, #6E2C8B)"
+    : "var(--Semantic-Color-Action-Primary-Default, #1C4EE4)";
+  return `<span style="color:${colorVar};font-weight:600;">@${person.name}</span>`;
+}
+
+const initialConversations: Conversation[] = [
+  { id: "1", name: "Sarah Johnson", initials: "SJ", avatarColor: "blue", time: "10:28", preview: "@John Doe board appreciates your insight and steady leadership during the quarterly review.", previewHtml: `${previewMention(CURRENT_USER_ID)} board appreciates your insight and steady leadership during the quarterly review.`, unread: 3 },
+  { id: "2", name: "Michael Kim", initials: "MK", avatarColor: "green", time: "10:30", preview: "Your dedication to the project has not gone unnoticed. Excellent work on the deliverables this sprint." },
+  { id: "3", name: "Rachel Brown", initials: "RB", avatarColor: "purple", time: "10:32", preview: "Great job on the presentation! Your creativity shines through every slide you produced.", unread: 2 },
+  { id: "4", name: "Lucas Davis", initials: "LD", avatarColor: "green", time: "10:34", preview: "Thank you for your analytical approach. It has significantly improved our decision-making process." },
+  { id: "5", name: "Alice Nguyen", initials: "AN", avatarColor: "blue", time: "10:36", preview: "Your teamwork and collaboration are exemplary and inspire everyone around you to do better." },
+  { id: "6", name: "Brian Thompson", initials: "BT", avatarColor: "red", time: "12:30", preview: "Hey @Alice Martin, appreciate your ability to tackle challenges head-on. Keep it up!", previewHtml: `Hey ${previewMention("p1")}, appreciate your ability to tackle challenges head-on. Keep it up!` },
+  { id: "7", name: "Finance team", initials: "JS", avatarColor: "green", time: "23.05.", preview: "@John Doe your insights have opened new avenues for our market expansion strategy.", previewHtml: `${previewMention(CURRENT_USER_ID)} your insights have opened new avenues for our market expansion strategy.`, unread: 2, isGroup: true, groupCount: 24 },
+  { id: "8", name: "Ethan Adams", initials: "EA", avatarColor: "yellow", time: "04.06", preview: "You have an incredible knack for problem-solving. Great job!" },
+  { id: "9", name: "Grace Fisher", initials: "GF", avatarColor: "green", time: "09.12.", preview: "Thank you for your commitment to quality. It elevates our work and sets a standard for the team." },
+  { id: "10", name: "Henry Roberts", initials: "HR", avatarColor: "purple", time: "03.12.", preview: "Your leadership during the crisis has been inspiring. Thank you for keeping everyone focused." },
+];
 
 function getThreadMessages(conversation: Conversation): Message[] {
   const other = { sender: conversation.name, initials: conversation.initials, avatarColor: conversation.avatarColor };
@@ -193,6 +206,8 @@ function ConversationItem({ conversation, onSelect }: { conversation: Conversati
         </Stack>
         <Stack direction="row" alignItems="center" justifyContent="space-between" gap="8px" sx={{ mt: "2px" }}>
           <Typography
+            component="div"
+            {...(conversation.previewHtml ? { dangerouslySetInnerHTML: { __html: conversation.previewHtml } } : {})}
             sx={{
               overflow: "hidden",
               color: "var(--Semantic-Color-Type-Default, #242628)",
@@ -205,7 +220,7 @@ function ConversationItem({ conversation, onSelect }: { conversation: Conversati
               lineHeight: "18px",
             }}
           >
-            {conversation.preview}
+            {conversation.previewHtml ? undefined : conversation.preview}
           </Typography>
           {conversation.unread && (
             <Box
